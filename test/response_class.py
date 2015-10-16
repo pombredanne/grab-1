@@ -1,11 +1,9 @@
 # coding: utf-8
 from __future__ import absolute_import
-from unittest import TestCase
-from grab import Grab, DataNotFound, GrabMisuseError
 import os.path
 
-from .util import TEST_DIR, TMP_DIR, GRAB_TRANSPORT
-from .tornado_util import SERVER
+from test.util import TEST_DIR, TMP_DIR, build_grab
+from test.util import BaseGrabTestCase
 
 HTML = """
 Hello world
@@ -13,43 +11,41 @@ Hello world
 
 IMG_FILE = os.path.join(TEST_DIR, 'files', 'yandex.png')
 
-class TestResponse(TestCase):
+
+class TestResponse(BaseGrabTestCase):
     def setUp(self):
-        SERVER.reset()
+        self.server.reset()
 
     def test_save(self):
-        """
-        Test `Response.save` method.
-        """
-        
+        "Test `Response.save` method."
         img_data = open(IMG_FILE, 'rb').read()
         temp_file = os.path.join(TMP_DIR, 'file.bin')
-        SERVER.RESPONSE['get'] = img_data
+        self.server.response['get.data'] = img_data
 
-        g = Grab(transport=GRAB_TRANSPORT)
-        g.go(SERVER.BASE_URL)
+        g = build_grab()
+        g.go(self.server.get_url())
         g.response.save(temp_file)
         self.assertEqual(open(temp_file, 'rb').read(), img_data)
 
     def test_save_hash(self):
-        """
-        Test `Response.save_hash` method.
-        """
-        
+        "Test `Response.save_hash` method."
         img_data = open(IMG_FILE, 'rb').read()
-        SERVER.RESPONSE['get'] = img_data
+        self.server.response['get.data'] = img_data
 
-        g = Grab(transport=GRAB_TRANSPORT)
-        g.go(SERVER.BASE_URL)
-        path = g.response.save_hash(SERVER.BASE_URL, TMP_DIR)
+        g = build_grab()
+        g.go(self.server.get_url())
+        path = g.response.save_hash(self.server.get_url(), TMP_DIR)
         test_data = open(os.path.join(TMP_DIR, path), 'rb').read()
         self.assertEqual(test_data, img_data)
 
     def test_custom_charset(self):
-        SERVER.RESPONSE['get'] = u'<html><head><meta http-equiv="Content-Type" content="text/html; charset=utf8;charset=cp1251" /></head><body><h1>крокодил</h1></body></html>'.encode('utf-8')
-        g = Grab(transport=GRAB_TRANSPORT)
+        self.server.response['get.data'] = u'<html><head><meta '\
+            u'http-equiv="Content-Type" content="text/html; '\
+            u'charset=utf8;charset=cp1251" /></head><body>'\
+            u'<h1>крокодил</h1></body></html>'.encode('utf-8')
+        g = build_grab()
         g.setup(document_charset='utf-8')
-        g.go(SERVER.BASE_URL)
+        g.go(self.server.get_url())
         self.assertTrue(u'крокодил' in g.response.unicode_body())
 
     def test_xml_declaration(self):
@@ -57,11 +53,11 @@ class TestResponse(TestCase):
         unicode_body() should return HTML with xml declaration (if it
         exists in original HTML)
         """
-        SERVER.RESPONSE['get'] = """<?xml version="1.0" encoding="UTF-8"?>
+        self.server.response['get.data'] = """<?xml version="1.0" encoding="UTF-8"?>
         <html><body><h1>тест</h1></body></html>
         """
-        g = Grab()
-        g.go(SERVER.BASE_URL)
+        g = build_grab()
+        g.go(self.server.get_url())
         ubody = g.response.unicode_body()
         self.assertTrue(u'тест' in ubody)
         self.assertTrue('<?xml' in ubody)

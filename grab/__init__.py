@@ -1,8 +1,8 @@
-from .error import (GrabError, DataNotFound, GrabNetworkError,
-                    GrabMisuseError, GrabTimeoutError)
-from .upload import UploadContent, UploadFile
-from .base import Grab
-from .tools.logs import default_logging
+from __future__ import absolute_import
+from grab.error import (GrabError, DataNotFound, GrabNetworkError,  # noqa
+                        GrabMisuseError, GrabTimeoutError)
+from grab.upload import UploadContent, UploadFile  # noqa
+from grab.base import Grab  # noqa
+from weblib.logs import default_logging  # noqa
 
-version_info = (0, 4, 13)
-__version__ = '.'.join(map(str, version_info))
+__version__ = '0.6.29'

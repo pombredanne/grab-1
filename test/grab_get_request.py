@@ -1,39 +1,42 @@
 # coding: utf-8
-from unittest import TestCase
-import os
-
-from grab import Grab, GrabMisuseError
-from .util import (GRAB_TRANSPORT, TMP_DIR,
-                   ignore_transport, only_transport)
-from .tornado_util import SERVER
-from grab.extension import register_extensions
+from test.util import build_grab
+from test.util import BaseGrabTestCase
 
 
-class GrabSimpleTestCase(TestCase):
+class GrabSimpleTestCase(BaseGrabTestCase):
     def setUp(self):
-        SERVER.reset()
+        self.server.reset()
 
     def test_get(self):
-        SERVER.RESPONSE['get'] = 'Final Countdown'
-        g = Grab(transport=GRAB_TRANSPORT)
-        g.go(SERVER.BASE_URL)
-        self.assertTrue('Final Countdown' in g.response.body)
+        self.server.response['get.data'] = 'Final Countdown'
+        g = build_grab()
+        g.go(self.server.get_url())
+        self.assertTrue(b'Final Countdown' in g.response.body)
 
     def test_body_content(self):
-        SERVER.RESPONSE['get'] = 'Simple String'
-        g = Grab(transport=GRAB_TRANSPORT)
-        g.go(SERVER.BASE_URL)
-        self.assertEqual('Simple String', g.response.body)
-        #self.assertEqual('Simple String' in g.response.runtime_body)
+        self.server.response['get.data'] = 'Simple String'
+        g = build_grab()
+        g.go(self.server.get_url())
+        self.assertEqual(b'Simple String', g.response.body)
+        # self.assertEqual('Simple String' in g.response.runtime_body)
 
     def test_status_code(self):
-        SERVER.RESPONSE['get'] = 'Simple String'
-        g = Grab(transport=GRAB_TRANSPORT)
-        g.go(SERVER.BASE_URL)
+        self.server.response['get.data'] = 'Simple String'
+        g = build_grab()
+        g.go(self.server.get_url())
         self.assertEqual(200, g.response.code)
 
+    def test_depreated_hammer_mode_options(self):
+        self.server.response['get.data'] = 'foo'
+        g = build_grab()
+        g.setup(hammer_mode=True)
+        g.go(self.server.get_url())
+
+        g.setup(hammer_timeouts=((1, 1), (2, 2)))
+        g.go(self.server.get_url())
+
     def test_parsing_response_headers(self):
-        SERVER.RESPONSE['headers'] = [('Hello', 'Grab')]
-        g = Grab(transport=GRAB_TRANSPORT)
-        g.go(SERVER.BASE_URL)
+        self.server.response['headers'] = [('Hello', 'Grab')]
+        g = build_grab()
+        g.go(self.server.get_url())
         self.assertTrue(g.response.headers['Hello'] == 'Grab')

@@ -1,67 +1,62 @@
 # coding: utf-8
-from unittest import TestCase
+from grab import GrabMisuseError, GrabError
+from grab.error import GrabTooManyRedirectsError
+from grab.base import reset_request_counter
+from test.util import build_grab
+from test.util import BaseGrabTestCase
+import six
+import tempfile
+import os
 
-from grab import Grab, GrabMisuseError
-from .util import GRAB_TRANSPORT, ignore_transport, only_transport
-from .tornado_util import SERVER
-from grab.extension import register_extensions
 
-from grab.util.py3k_support import *
-
-class GrabApiTestCase(TestCase):
+class GrabApiTestCase(BaseGrabTestCase):
     def setUp(self):
-        SERVER.reset()
+        self.server.reset()
 
     def test_incorrect_option_name(self):
-        g = Grab(transport=GRAB_TRANSPORT)
-        self.assertRaises(GrabMisuseError,
-            lambda: g.setup(save_the_word=True))
+        g = build_grab()
+        self.assertRaises(GrabMisuseError, g.setup,
+                          save_the_word=True)
 
-    @ignore_transport('ghost.GhostTransport')
-    # Ghost test was disabled because of strange error
-    # that appear when multiple Ghost instances are created
     def test_clone(self):
-        g = Grab(transport=GRAB_TRANSPORT)
-        SERVER.RESPONSE['get'] = 'Moon'
-        g.go(SERVER.BASE_URL)
-        self.assertTrue('Moon' in g.response.body)
-        g2 = Grab(transport=GRAB_TRANSPORT)
-        self.assertEqual(g2.response, None)
-        g2 = g.clone()
-        self.assertTrue('Moon' in g.response.body)
+        g = build_grab()
+        self.server.response['get.data'] = 'Moon'
+        g.go(self.server.get_url())
+        self.assertTrue(b'Moon' in g.response.body)
+        self.server.response['post.data'] = 'Foo'
+        g2 = g.clone(method='post', post='')
+        g2.go(self.server.get_url())
+        self.assertTrue(b'Foo' in g2.response.body)
 
-    @ignore_transport('ghost.GhostTransport')
     def test_empty_clone(self):
-        g = Grab()
+        g = build_grab()
         g.clone()
 
-    @ignore_transport('ghost.GhostTransport')
     def test_adopt(self):
-        g = Grab(transport=GRAB_TRANSPORT)
-        SERVER.RESPONSE['get'] = 'Moon'
-        g.go(SERVER.BASE_URL)
-        g2 = Grab(transport=GRAB_TRANSPORT)
+        g = build_grab()
+        self.server.response['get.data'] = 'Moon'
+        g.go(self.server.get_url())
+        g2 = build_grab()
         self.assertEqual(g2.config['url'], None)
         g2.adopt(g)
-        self.assertTrue('Moon' in g2.response.body)
-        self.assertEqual(g2.config['url'], SERVER.BASE_URL)
+        self.assertTrue(b'Moon' in g2.response.body)
+        self.assertEqual(g2.config['url'], self.server.get_url())
 
     def test_empty_adopt(self):
-        g = Grab()
-        g2 = Grab()
+        g = build_grab()
+        g2 = build_grab()
         g2.adopt(g)
 
     def test_default_content_for_fake_response(self):
-        content = '<strong>test</strong>'
-        g = Grab(content)
+        content = b'<strong>test</strong>'
+        g = build_grab(document_body=content)
         self.assertEqual(g.response.body, content)
 
     def test_inheritance(self):
+        from grab import Grab
+
         class SimpleExtension(object):
             data = {'counter': 0}
-
-            def extra_init(self):
-                self.get_data()['counter'] += 1
 
             @classmethod
             def get_data(cls):
@@ -70,55 +65,82 @@ class GrabApiTestCase(TestCase):
         class CustomGrab(Grab, SimpleExtension):
             pass
 
-        register_extensions(CustomGrab)
-
         SimpleExtension.get_data()['counter'] = 0
-        g = CustomGrab()
-        self.assertEqual(SimpleExtension.get_data()['counter'], 1)
+        CustomGrab()
+        # self.assertEqual(SimpleExtension.get_data()['counter'], 1)
 
         class VeryCustomGrab(CustomGrab):
             pass
 
         SimpleExtension.get_data()['counter'] = 0
-        g = VeryCustomGrab()
-        self.assertEqual(SimpleExtension.get_data()['counter'], 1)
+        VeryCustomGrab()
+        # self.assertEqual(SimpleExtension.get_data()['counter'], 1)
 
-
-        # TODO: what did I mean? :)
-        # Anyway it does not work now :)
-        #class VeryCustomGrab(CustomGrab, SimpleExtension):
-            #pass
-
-        #SimpleExtension.get_data()['counter'] = 0
-        #g = VeryCustomGrab()
-        #self.assertEqual(SimpleExtension.get_data()['counter'], 2)
-
-    @ignore_transport('grab.transport.kit.KitTransport')
     def test_request_counter(self):
-        import grab.base
-        import itertools
         import threading
 
-        grab.base.REQUEST_COUNTER = itertools.count(1)
-        g = Grab(transport=GRAB_TRANSPORT)
-        g.go(SERVER.BASE_URL)
+        reset_request_counter()
+        g = build_grab()
+        g.go(self.server.get_url())
         self.assertEqual(g.request_counter, 1)
 
-        g.go(SERVER.BASE_URL)
+        g.go(self.server.get_url())
         self.assertEqual(g.request_counter, 2)
 
         def func():
-            g = Grab(transport=GRAB_TRANSPORT)
-            g.go(SERVER.BASE_URL)
+            g = build_grab()
+            g.go(self.server.get_url())
 
         # Make 10 requests in concurrent threads
         threads = []
-        for x in xrange(10):
+        for x in six.moves.range(10):
             th = threading.Thread(target=func)
             threads.append(th)
             th.start()
         for th in threads:
             th.join()
 
-        g.go(SERVER.BASE_URL)
+        g.go(self.server.get_url())
         self.assertEqual(g.request_counter, 13)
+
+    def test_download(self):
+        fd, path = tempfile.mkstemp()
+        g = build_grab()
+        self.server.response['get.data'] = 'FOO'
+        length = g.download(self.server.get_url(), path)
+        self.assertEqual(3, length)
+        os.unlink(path)
+
+    def test_make_url_absolute(self):
+        g = build_grab()
+        self.server.response['get.data'] = '<base href="http://foo/bar/">'
+        g.go(self.server.get_url())
+        absolute_url = g.make_url_absolute('/foobar', resolve_base=True)
+        self.assertEqual(absolute_url, 'http://foo/foobar')
+        g = build_grab()
+        absolute_url = g.make_url_absolute('/foobar')
+        self.assertEqual(absolute_url, '/foobar')
+
+    def test_error_request(self):
+        g = build_grab()
+        g.setup(post={'foo': 'bar'})
+
+        self.assertRaises(GrabError, g.go,
+                          url='Could-not-resolve-host-address')
+        self.assertEqual(g.config['post'], None)
+        self.assertEqual(g.config['multipart_post'], None)
+        self.assertEqual(g.config['method'], None)
+        self.assertEqual(g.config['body_storage_filename'], None)
+
+    def test_setup_document(self):
+        data = b'''
+        <h1>test</h1>
+        '''
+        g = build_grab(data)
+        self.assertTrue(b'test' in g.doc.body)
+
+    def test_setup_document_invalid_input(self):
+        data = u'''
+        <h1>test</h1>
+        '''
+        self.assertRaises(GrabMisuseError, build_grab, data)

@@ -1,32 +1,29 @@
-from unittest import TestCase
+from grab.spider import Spider, Task
+from test.util import BaseGrabTestCase, build_spider
 
-from grab import Grab
-from grab.spider import Spider, Task, Data
-from .tornado_util import SERVER
 
-class MiscTest(TestCase):
+class MiscTest(BaseGrabTestCase):
     def setUp(self):
-        SERVER.reset()
+        self.server.reset()
 
     def test_null_grab_bug(self):
         # Test following bug:
         # Create task and process it
         # In task handler spawn another task with grab instance
         # received in arguments of current task
-        class SimpleSpider(Spider):
-            def prepare(self):
-                self.page_count = 0
+        server = self.server
 
+        class SimpleSpider(Spider):
             def task_generator(self):
-                yield Task('one', url=SERVER.BASE_URL)
+                yield Task('one', url=server.get_url())
 
             def task_one(self, grab, task):
-                self.page_count += 1
+                self.stat.inc('page_count')
                 yield Task('two', grab=grab)
 
             def task_two(self, grab, task):
-                self.page_count += 1
+                self.stat.inc('page_count')
 
-        bot = SimpleSpider(thread_number=1)
+        bot = build_spider(SimpleSpider, thread_number=1)
         bot.run()
-        self.assertEqual(2, bot.page_count)
+        self.assertEqual(2, bot.stat.counters['page_count'])

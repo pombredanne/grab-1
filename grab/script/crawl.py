@@ -1,105 +1,152 @@
 import logging
 import os
 from argparse import ArgumentParser
+import six
 
-from grab.util.config import build_spider_config, build_global_config
+from grab.util.config import build_spider_config, build_root_config
 from grab.util.module import load_spider_class
-from grab.tools.logs import default_logging
-from grab.tools.lock import assert_lock
-from grab.spider.save_result import save_result
-from grab.tools.files import clear_directory
+from weblib.logs import default_logging
+from weblib.files import clear_directory
+from weblib.encoding import make_str
 
 logger = logging.getLogger('grab.script.crawl')
+
 
 def setup_arg_parser(parser):
     parser.add_argument('spider_name', type=str)
     parser.add_argument('-t', '--thread-number', default=None, type=int,
                         help='Number of network threads')
-    parser.add_argument('--slave', action='store_true', default=False,
-                        help='Enable the slave-mode')
-    parser.add_argument('--network-logs', action='store_true', default=False,
+    parser.add_argument('-n', '--network-logs', action='store_true',
+                        default=False,
                         help='Dump to console details about network requests')
-    parser.add_argument('--save-result', action='store_true', default=False,
-                        help='Save crawling state to database')
+    parser.add_argument('--disable-proxy', action='store_true', default=False,
+                        help='Disable proxy servers')
+    parser.add_argument('--ignore-lock', action='store_true', default=False)
+    parser.add_argument('--disable-report', action='store_true', default=False)
+    parser.add_argument('--disable-default-logs', action='store_true',
+                        default=False)
+    parser.add_argument('--settings-module', type=str, default='settings')
+    parser.add_argument('--api-port', type=int, default=None)
+    parser.add_argument('--mp-mode', action='store_true', default=False,
+                        help='Run task handlers (HTML parsers) in separate '
+                             'processes')
+    parser.add_argument('--parser-pool-size', type=int)
 
 
-@save_result
-def main(spider_name, thread_number=None, slave=False,
-         settings='settings', network_logs=False,
-         *args, **kwargs):
-    default_logging(propagate_network_logger=network_logs)
+def get_lock_key(spider_name, lock_key=None, ignore_lock=False,
+                 **kwargs):
+    # --ignore-lock has highest precedence
+    if ignore_lock:
+        return None
 
-    lock_key = None
-    if not slave:
-        lock_key = 'crawl.%s' % spider_name
+    # If --lock-key is specified explicitly use it
     if lock_key is not None:
-        lock_path = 'var/run/%s.lock' % lock_key
-        logger.debug('Trying to lock file: %s' % lock_path)
-        assert_lock(lock_path)
+        return lock_key
 
-    config = build_global_config(settings)
-    spider_class = load_spider_class(config, spider_name)
-    spider_config = build_spider_config(spider_class, config)
+    # As fallback, if no information has been given about locking
+    # generate lock key from the spider name and use it
+    lock_key = 'crawl.%s' % spider_name
+    return lock_key
 
-    if hasattr(spider_class, 'setup_extra_args'):
+
+def save_list(lst, path):
+    """
+    Save items from list to the file.
+    """
+
+    with open(path, 'wb') as out:
+        lines = []
+        for item in lst:
+            if isinstance(item, (six.text_type, six.binary_type)):
+                lines.append(make_str(item))
+            else:
+                lines.append(make_str(json.dumps(item)))
+        out.write(b'\n'.join(lines) + b'\n')
+
+
+def main(spider_name, thread_number=None,
+         settings_module='settings', network_logs=False,
+         disable_proxy=False, ignore_lock=False,
+         disable_report=False,
+         disable_default_logs=False,
+         api_port=None,
+         mp_mode=False,
+         parser_pool_size=None,
+         *args, **kwargs):
+    if disable_default_logs:
+        default_logging(propagate_network_logger=network_logs,
+                        grab_log=None, network_log=None)
+    else:
+        default_logging(propagate_network_logger=network_logs)
+
+    root_config = build_root_config(settings_module)
+    spider_class = load_spider_class(root_config, spider_name)
+    spider_config = build_spider_config(spider_class, root_config)
+
+    spider_args = None
+    if hasattr(spider_class, 'setup_arg_parser'):
         parser = ArgumentParser()
-        spider_class.setup_extra_args(parser)
-        extra_args, trash = parser.parse_known_args()
-        spider_config['extra_args'] = vars(extra_args)
-
-    if thread_number is None:
-        thread_number = spider_config.getint('GRAB_THREAD_NUMBER')
-
-    stat_task_object = kwargs.get('stat_task_object', None)
+        spider_class.setup_arg_parser(parser)
+        opts, trash = parser.parse_known_args()
+        spider_args = vars(opts)
 
     bot = spider_class(
         thread_number=thread_number,
-        slave=slave,
         config=spider_config,
-        network_try_limit=spider_config.getint('GRAB_NETWORK_TRY_LIMIT'),
-        task_try_limit=spider_config.getint('GRAB_TASK_TRY_LIMIT'),
+        network_try_limit=None,
+        task_try_limit=None,
+        args=spider_args,
+        http_api_port=api_port,
+        mp_mode=mp_mode,
+        parser_pool_size=parser_pool_size,
     )
-    if spider_config.get('GRAB_QUEUE'):
-        bot.setup_queue(**spider_config['GRAB_QUEUE'])
-    if spider_config.get('GRAB_CACHE'):
-        bot.setup_cache(**spider_config['GRAB_CACHE'])
-    if spider_config.get('GRAB_PROXY_LIST'):
-        bot.load_proxylist(**spider_config['GRAB_PROXY_LIST'])
-    if spider_config.get('GRAB_COMMAND_INTERFACES'):
-        for iface_config in spider_config['GRAB_COMMAND_INTERFACES']:
-            bot.controller.add_interface(**iface_config)
+    opt_queue = spider_config.get('queue')
+    if opt_queue:
+        bot.setup_queue(**opt_queue)
 
-    # Dirty hack
-    # FIXIT: REMOVE
-    bot.dump_spider_stats = kwargs.get('dump_spider_stats')
-    bot.stats_object = kwargs.get('stats_object')
+    opt_cache = spider_config.get('cache')
+    if opt_cache:
+        bot.setup_cache(**opt_cache)
+
+    opt_proxy_list = spider_config.get('proxy_list')
+    if opt_proxy_list:
+        if disable_proxy:
+            logger.debug('Proxy servers disabled via command line')
+        else:
+            bot.load_proxylist(**opt_proxy_list)
+
+    opt_ifaces = spider_config.get('command_interfaces')
+    if opt_ifaces:
+        for iface_config in opt_ifaces:
+            bot.controller.add_interface(**iface_config)
 
     try:
         bot.run()
     except KeyboardInterrupt:
         pass
 
-    stats = bot.render_stats(timing=config.get('GRAB_DISPLAY_TIMING'))
+    stats = bot.render_stats(timing=spider_config.get('display_timing'))
+    stats_with_time = bot.render_stats(timing=True)
 
-    if config.get('GRAB_DISPLAY_STATS'):
+    if spider_config.get('display_stats'):
         logger.debug(stats)
 
     pid = os.getpid()
     logger.debug('Spider pid is %d' % pid)
 
-    if config.get('GRAB_SAVE_REPORT'):
-        for subdir in (str(pid), 'last'):
-            dir_ = 'var/%s' % subdir
-            if not os.path.exists(dir_):
-                os.mkdir(dir_)
-            else:
-                clear_directory(dir_)
-            bot.save_list('fatal', '%s/fatal.txt' % dir_)
-            bot.save_list('task-count-rejected', '%s/task_count_rejected.txt' % dir_)
-            bot.save_list('network-count-rejected', '%s/network_count_rejected.txt' % dir_)
-            bot.save_list('task-with-invalid-url', '%s/task_with_invalid_url.txt' % dir_)
-            with open('%s/report.txt' % dir_, 'wb') as out:
-                out.write(stats)
+    if not disable_report:
+        if spider_config.get('save_report'):
+            for subdir in (str(pid), 'last'):
+                dir_ = 'var/%s' % subdir
+                if not os.path.exists(dir_):
+                    os.makedirs(dir_)
+                else:
+                    clear_directory(dir_)
+                for key, lst in bot.stat.collections.items():
+                    fname_key = key.replace('-', '_')
+                    save_list(lst, '%s/%s.txt' % (dir_, fname_key))
+                with open('%s/report.txt' % dir_, 'wb') as out:
+                    out.write(make_str(stats_with_time))
 
     return {
         'spider_stats': bot.render_stats(timing=False),

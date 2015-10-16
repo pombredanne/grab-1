@@ -1,2 +1,5 @@
-from __future__ import absolute_import
-from .selector import *
+import logging
+from grab.selector.selector import *  # noqa
+from grab.util.warning import warn
+
+warn('Module `grab.selector` is deprecated. Use `selection` package.')

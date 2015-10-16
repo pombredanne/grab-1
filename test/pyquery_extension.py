@@ -1,6 +1,6 @@
 # coding: utf-8
-from unittest import TestCase
-from grab import Grab, DataNotFound
+from grab import Grab
+from test.util import BaseGrabTestCase
 
 HTML = u"""
 <head>
@@ -28,13 +28,15 @@ HTML = u"""
     </ul>
 """.encode('cp1251')
 
-class PyqueryExtensionTest(TestCase):
+
+class PyqueryExtensionTest(BaseGrabTestCase):
     def setUp(self):
         # Create fake grab instance with fake response
         self.g = Grab(HTML, charset='cp1251')
 
     def test_some_things(self):
         from pyquery import PyQuery
+
         self.assertEqual(self.g.pyquery('#num-1').text(), u'item #100 2')
         self.assertEqual(self.g.pyquery('li').filter(
-            lambda x: '#2' in PyQuery(this).text()).text(), u'item #2')
+            lambda x: '#2' in PyQuery(x).text()).text(), u'item #2')

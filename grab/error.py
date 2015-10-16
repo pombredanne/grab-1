@@ -1,16 +1,20 @@
+from __future__ import absolute_import
 """
-Custom exception which could generate Grab instance.
+Custom exception which Grab instance could generate.
 
 Taxonomy:
 
 Exception
 |-> GrabError
-    |-> GrabNetworkError <- IOError 
-    |-> DataNotFound <- IndexError
+    |-> GrabNetworkError <- IOError
     |-> Grab*Error
 
+Exception
+| -> weblib.error.WeblibError
+     |-> DataNotFound <- IndexError
 """
-import warnings
+from weblib.error import DataNotFound  # noqa
+
 
 class GrabError(Exception):
     """
@@ -32,12 +36,6 @@ class GrabTimeoutError(GrabNetworkError):
     """
 
 
-class DataNotFound(IndexError, GrabError):
-    """
-    Indictes that required data is not found.
-    """
-
-
 class GrabMisuseError(GrabError):
     """
     Indicates incorrect usage of grab API.
@@ -49,6 +47,13 @@ class GrabConnectionError(GrabNetworkError):
     Raised when it is not possible to establish network connection.
 
     In curl transport it is CURLE_COULDNT_CONNECT (7)
+    """
+
+
+class GrabCouldNotResolveHostError(GrabNetworkError):
+    """
+    URLE_COULDNT_RESOLVE_HOST (6)
+    Couldn't resolve host. The given remote host was not resolved.
     """
 
 
@@ -67,16 +72,12 @@ class GrabTooManyRedirectsError(GrabError):
     """
 
 
-class GrabDeprecationWarning(Warning):
-    """
-    Raised when some deprecated feature is used.
-    """
-
 class GrabInvalidUrl(GrabError):
     """
     Raised when Grab have no idea how to handle the URL or when
-    some error occured while normalizing URL e.g. IDN processing.
+    some error occurred while normalizing URL e.g. IDN processing.
     """
 
-def warn(msg):
-    warnings.warn(msg, category=GrabDeprecationWarning, stacklevel=3)
+
+class GrabInternalError(GrabError):
+    pass

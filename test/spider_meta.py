@@ -1,11 +1,8 @@
-from unittest import TestCase
+from grab.spider import Spider
+from test.util import BaseGrabTestCase, build_spider
 
-from grab.spider import Spider, Task, Data
-from .tornado_util import SERVER
 
-from grab.util.py3k_support import *
-
-class SpiderMetaTestCase(TestCase):
+class SpiderMetaTestCase(BaseGrabTestCase):
 
     def test_root_spider_class(self):
         self.assertEqual(Spider.Meta.abstract, True)

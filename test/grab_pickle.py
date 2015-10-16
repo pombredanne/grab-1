@@ -1,26 +1,28 @@
 # coding: utf-8
-from unittest import TestCase
 try:
     import cPickle as pickle
 except ImportError:
     import pickle
-from multiprocessing import Process, Queue
+from multiprocessing import Queue
 
-from grab import Grab
-from .tornado_util import SERVER
+from test.util import BaseGrabTestCase, exclude_transport
+from test.util import build_grab
 
-class TestGrab(TestCase):
+
+class TestGrab(BaseGrabTestCase):
     def setUp(self):
-        SERVER.reset()
+        self.server.reset()
 
+    @exclude_transport('urllib3')
     def test_pickling(self):
         """
         Test that Grab instance could be pickled and unpickled.
         """
 
-        g = Grab()
-        SERVER.RESPONSE['get'] = '<form><textarea name="text">the cat</textarea></form>'
-        g.go(SERVER.BASE_URL)
+        g = build_grab()
+        self.server.response['get.data'] =\
+            '<form><textarea name="text">the cat</textarea></form>'
+        g.go(self.server.get_url())
         g.set_input('text', 'foobar')
         data = pickle.dumps(g, pickle.HIGHEST_PROTOCOL)
 
@@ -30,8 +32,9 @@ class TestGrab(TestCase):
             resultq.put(text)
 
         result_queue = Queue()
-        p = Process(target=func, args=[data, result_queue])
-        p.start()
+        # p = Process(target=func, args=[data, result_queue])
+        # p.start()
+        func(data, result_queue)
 
-        text = result_queue.get()
+        text = result_queue.get(block=True, timeout=1)
         self.assertEqual(text, 'the cat')

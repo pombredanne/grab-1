@@ -1,14 +1,14 @@
-from unittest import TestCase
+import pickle
 
 from grab import Grab
-from .tornado_util import SERVER
+from test.util import BaseGrabTestCase
 from grab.transport.curl import CurlTransport
-import pickle
+
 
 class FakeTransport(CurlTransport):
     def prepare_response(self, grab):
         resp = super(FakeTransport, self).prepare_response(grab)
-        resp.body = 'Faked ' + resp.body
+        resp.body = b'Faked ' + resp.body
         return resp
 
 
@@ -20,37 +20,37 @@ def get_fake_transport():
     return FakeTransport()
 
 
-class TestTransportTestCase(TestCase):
+class TestTransportTestCase(BaseGrabTestCase):
     def setUp(self):
-        SERVER.reset()
-        SERVER.RESPONSE['get'] = 'XYZ'
+        self.server.reset()
+        self.server.response['get.data'] = 'XYZ'
 
     def transport_option_logic(self, curl_transport, fake_transport):
         g = Grab(transport=curl_transport)
-        g.go(SERVER.BASE_URL)
-        self.assertEqual(g.response.body, 'XYZ')
+        g.go(self.server.get_url())
+        self.assertEqual(g.response.body, b'XYZ')
 
         g2 = g.clone()
-        g.go(SERVER.BASE_URL)
-        self.assertEqual(g.response.body, 'XYZ')
+        g.go(self.server.get_url())
+        self.assertEqual(g.response.body, b'XYZ')
 
         g2_data = pickle.dumps(g2, pickle.HIGHEST_PROTOCOL)
         g3 = pickle.loads(g2_data)
-        g3.go(SERVER.BASE_URL)
-        self.assertEqual(g3.response.body, 'XYZ')
+        g3.go(self.server.get_url())
+        self.assertEqual(g3.response.body, b'XYZ')
 
         g = Grab(transport=fake_transport)
-        g.go(SERVER.BASE_URL)
-        self.assertEqual(g.response.body, 'Faked XYZ')
+        g.go(self.server.get_url())
+        self.assertEqual(g.response.body, b'Faked XYZ')
 
         g2 = g.clone()
-        g.go(SERVER.BASE_URL)
-        self.assertEqual(g.response.body, 'Faked XYZ')
+        g.go(self.server.get_url())
+        self.assertEqual(g.response.body, b'Faked XYZ')
 
         g2_data = pickle.dumps(g2, pickle.HIGHEST_PROTOCOL)
         g3 = pickle.loads(g2_data)
-        g3.go(SERVER.BASE_URL)
-        self.assertEqual(g3.response.body, 'Faked XYZ')
+        g3.go(self.server.get_url())
+        self.assertEqual(g3.response.body, b'Faked XYZ')
 
     def test_transport_option_as_string(self):
         self.transport_option_logic(
